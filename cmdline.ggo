@@ -1,0 +1,22 @@
+package "simucached"
+version "0.2"
+usage "simucached [options]"
+description "bleh"
+
+args "-c cc --show-required -C --default-optional -l"
+
+option "verbose" v "Verbosity. Repeat for more verbose." multiple
+option "quiet" - "Disable log messages."
+
+option "threads" t "Number of threads to spawn." int default="1"
+option "port" p "What port to listen on." int default="11211"
+
+option "affinity" T "Set distinct CPU affinity for threads, round-robin"
+
+option "value_size" V "Size of memcached values to return." int default="200"
+
+option "no_parse" N "Don't parse memcached protocol. Reply with GET replies."
+
+option "calibration" c "Use pre-determined value for work-loop calibration
+(see log output from --work)." int default="0"
+option "work" w "Work (in us) to do per request." int default="0"
