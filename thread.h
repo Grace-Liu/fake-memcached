@@ -9,8 +9,9 @@
 
 class Thread {
 public:
+  struct thread_context *ctx;
   pthread_t pt; // pthread handle
-  int efd; // epoll set file descriptor
+  //int efd; // epoll set file descriptor
 };
 
 class Connection {
