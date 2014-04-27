@@ -18,7 +18,6 @@
 #include <mtcp_api.h>
 #include <mtcp_epoll.h>
 
-#include "http_parsing.h"
 #include "debug.h"
 
 #define MAX_FLOW_NUM  (10000)
@@ -268,8 +267,7 @@ RunServerThread(void *arg)
 				} else {
 					perror("mtcp_getsockopt");
 				}
-				CloseConnection(ctx, events[i].data.sockid, 
-						&ctx->svars[events[i].data.sockid]);
+				CloseConnection(ctx, events[i].data.sockid);
 
 			} else if (events[i].events & MTCP_EPOLLIN) {
 				ret = HandleReadEvent(ctx, events[i].data.sockid);
@@ -280,8 +278,7 @@ RunServerThread(void *arg)
 				} else if (ret < 0) {
 					/* if not EAGAIN, it's an error */
 					if (errno != EAGAIN) {
-						CloseConnection(ctx, events[i].data.sockid, 
-								&ctx->svars[events[i].data.sockid]);
+						CloseConnection(ctx, events[i].data.sockid);
 					}
 				}
 
