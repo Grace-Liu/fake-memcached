@@ -19,6 +19,11 @@
 #include <mtcp_epoll.h>
 
 #include "debug.h"
+/*----------------------------------------------------------------------------*/
+#include <stdint.h>
+#define USEC_PER_SEC 1000000
+#define READ_CHUNK 16384
+/*----------------------------------------------------------------------------*/
 
 #define MAX_FLOW_NUM  (10000)
 
@@ -51,6 +56,28 @@
 #define HT_SUPPORT FALSE
 
 /*----------------------------------------------------------------------------*/
+typedef struct conn conn;
+struct conn
+{
+	 int fd;
+	 enum conn_states state;
+ 	 int bytes_to_eat;
+  	 char buffer[READ_CHUNK+1];
+ 	 int buffer_idx;
+
+	   /* data for the mwrite state */
+    	  struct iovec *iov;
+    	  int    iovsize;   /* number of elements allocated in iov[] */
+    	  int    iovused;   /* number of elements used in iov[] */
+};
+
+enum conn_states{
+    IDLE = 0,
+    GOBBLE,
+    LAST_STATE
+  };
+
+/*----------------------------------------------------------------------------*/
 struct thread_context
 {
 	mctx_t mctx;
@@ -59,6 +86,7 @@ struct thread_context
 /*----------------------------------------------------------------------------*/
 static int num_cores;
 static int core_limit;
+static int value_size;
 static pthread_t app_thread[MAX_CPUS];
 static int done[MAX_CPUS];
 
@@ -69,25 +97,7 @@ CloseConnection(struct thread_context *ctx, int sockid)
 	mtcp_epoll_ctl(ctx->mctx, ctx->ep, MTCP_EPOLL_CTL_DEL, sockid, NULL);
 	mtcp_close(ctx->mctx, sockid);
 }
-/*----------------------------------------------------------------------------*/
-static int 
-SendUntilAvailable(struct thread_context *ctx, int sockid)
-{
-	int ret;
-	int sent;
-	int len;
 
-	return sent;
-}
-/*----------------------------------------------------------------------------*/
-static int 
-HandleReadEvent(struct thread_context *ctx, int sockid)
-{
-	struct mtcp_epoll_event ev;
-	int rd;
-
-	return rd;
-}
 /*----------------------------------------------------------------------------*/
 int 
 AcceptConnection(struct thread_context *ctx, int listener)
@@ -95,6 +105,7 @@ AcceptConnection(struct thread_context *ctx, int listener)
 	mctx_t mctx = ctx->mctx;
 	struct mtcp_epoll_event ev;
 	int c;
+	conn *newconn;
 
 	c = mtcp_accept(mctx, listener, NULL, NULL);
 
@@ -104,6 +115,9 @@ AcceptConnection(struct thread_context *ctx, int listener)
 			return -1;
 		}
 		TRACE_APP("New connection %d accepted.\n", c);
+
+		newconn = conn_init(c);
+		ev.data.ptr = newconn;
 		ev.events = MTCP_EPOLLIN;
 		ev.data.sockid = c;
 		mtcp_setsock_nonblock(ctx->mctx, c);
@@ -178,7 +192,7 @@ CreateListeningSocket(struct thread_context *ctx)
 	/* bind to port 80 */
 	saddr.sin_family = AF_INET;
 	saddr.sin_addr.s_addr = INADDR_ANY;
-	saddr.sin_port = htons(80);
+	saddr.sin_port = htons(11211);
 	ret = mtcp_bind(ctx->mctx, listener, 
 			(struct sockaddr *)&saddr, sizeof(struct sockaddr_in));
 	if (ret < 0) {
@@ -213,6 +227,27 @@ RunServerThread(void *arg)
 	int nevents;
 	int i, ret;
 	int do_accept;
+
+	int fd;
+	struct iovec iovs[3];
+	int len;
+	char s[value_size+10];
+	conn *c;
+
+	iovs[0].iov_base = (char*) "VALUE ";
+  	iovs[0].iov_len = strlen((char*) iovs[0].iov_base);
+  	iovs[1].iov_base = (char*) "key";
+ 	iovs[1].iov_len = strlen((char*) iovs[1].iov_base);
+
+	sprintf(s, "0%d\r\n\0", value_size);
+	len = strlen(s);
+	for(i=0; i< value_size; i++)
+       	 s[len+i] = 'f';
+	s[i] = '\0';
+	strcat(s, "\r\nEND\r\n");
+
+	iovs[2].iov_base = (char*) s;
+ 	iovs[2].iov_len = strlen(s);
 	
 	/* initialization */
 	ctx = InitializeServerThread(core);
@@ -246,47 +281,46 @@ RunServerThread(void *arg)
 
 		do_accept = FALSE;
 		for (i = 0; i < nevents; i++) {
-
+			c = (conn *)events[i].data.ptr;
+			fd = c->fd;
+			
 			if (events[i].data.sockid == listener) {
 				/* if the event is for the listener, accept connection */
 				do_accept = TRUE;
 
-			} else if (events[i].events & MTCP_EPOLLERR) {
-				int err;
-				socklen_t len = sizeof(err);
-
-				/* error on the connection */
-				TRACE_APP("[CPU %d] Error on socket %d\n", 
-						core, events[i].data.sockid);
-				if (mtcp_getsockopt(mctx, events[i].data.sockid, 
-						SOL_SOCKET, SO_ERROR, (void *)&err, &len) == 0) {
-					if (err != ETIMEDOUT) {
-						fprintf(stderr, "Error on socket %d: %s\n", 
-								events[i].data.sockid, strerror(err));
-					}
-				} else {
-					perror("mtcp_getsockopt");
-				}
-				CloseConnection(ctx, events[i].data.sockid);
-
-			} else if (events[i].events & MTCP_EPOLLIN) {
-				ret = HandleReadEvent(ctx, events[i].data.sockid);
-
-				if (ret == 0) {
-					/* connection closed by remote host */
-					CloseConnection(ctx, events[i].data.sockid);
-				} else if (ret < 0) {
-					/* if not EAGAIN, it's an error */
-					if (errno != EAGAIN) {
-						CloseConnection(ctx, events[i].data.sockid);
-					}
-				}
-
-			} else if (events[i].events & MTCP_EPOLLOUT) {
-				SendUntilAvailable(ctx, events[i].data.sockid);		
 			} else {
-				assert(0);
+		 		ret = mtcp_read(mctx, fd, c->buffer, sizeof(c->buffer));
+			        if (ret <= 0) {
+				          if (ret == EAGAIN) printf("read() returned EAGAIN");
+				          close(fd);
+				          free(c);
+				          continue;
+			        }
+
+			        c->buffer_idx = ret;
+			        c->buffer[c->buffer_idx] = '\0';
+
+			        char *start = c->buffer;
+
+			        // Locate a \r\n
+			        char *crlf = NULL;
+			        while (start < &c->buffer[c->buffer_idx]) {
+				          crlf = strstr(start, "\r\n");
+
+				          if (crlf == NULL) break; // No \r\n found.
+
+				          int length = crlf - start;
+
+				          if (mtcp_writev(mctx, fd, iovs, 3) == EAGAIN) {
+						  	printf("writev() returned EAGAIN");
+				          		start += length + 2;
+				          }		
+			        }
+
+			        continue;				
+
 			}
+			
 		}
 
 		/* if do_accept flag is set, accept connections */
@@ -324,6 +358,58 @@ SignalHandler(int signum)
 	}
 }
 /*----------------------------------------------------------------------------*/
+void inane_work() {
+  volatile int x = 0;
+  int i;
+  for (i = 0; i < 100; i++)
+    x;
+}
+
+void do_work(int iterations) {
+  int i;
+  for (i = 0; i < iterations; i++)
+    inane_work();
+}
+
+void do_work_usecs(int usecs) {
+  do_work(((double) usecs / 1000000) * args.calibration_arg);
+}
+
+void work() {
+  do_work_usecs(args.work_arg);
+}
+
+static inline int64_t calcdiff_us(struct timespec t1, struct timespec t2) {
+  int64_t diff;
+  diff = USEC_PER_SEC * (long long)((int) t1.tv_sec - (int) t2.tv_sec);
+  diff += ((int) t1.tv_nsec - (int) t2.tv_nsec) / 1000;
+  return diff;
+}
+
+uint64_t work_per_sec(uint64_t iterations) {
+  struct timespec start, stop;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  do_work(iterations);
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  uint64_t diff = calcdiff_us(stop, start);
+  return iterations * 1000000 / diff;
+}
+
+conn *conn_init(int fd) {
+	conn *c = malloc( sizeof(conn *)));
+	if(c==NULL) {
+		printf("Error on create conn \n");	
+	}
+	c->fd = fd;
+	c->state = IDLE;
+	c->bytes_to_eat = 0;
+	c->buffer_idx = 0;
+	
+    return c;
+}
+
+
+
 int 
 main(int argc, char **argv)
 {
@@ -349,6 +435,10 @@ main(int argc, char **argv)
 						"number of CPUS: %d\n", num_cores);
 				return FALSE;
 			}
+		}
+		if (strcmp(argv[i], "-V") == 0) {
+			value_size = atoi(argv[i + 1]);
+			printf("Value_size=%d\n", value_size);
 		}
 	}
 
