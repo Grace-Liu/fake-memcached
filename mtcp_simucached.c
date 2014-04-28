@@ -24,7 +24,8 @@
 #define USEC_PER_SEC 1000000
 #define READ_CHUNK 16384
 /*----------------------------------------------------------------------------*/
-
+#include <sys/syscall.h>
+#define gettid() syscall(SYS_gettid)
 #define MAX_FLOW_NUM  (10000)
 
 #define RCVBUF_SIZE (2*1024)
@@ -60,7 +61,7 @@ typedef struct conn conn;
 struct conn
 {
 	 int fd;
-	 enum conn_states state;
+	 //enum conn_states state;
  	 int bytes_to_eat;
   	 char buffer[READ_CHUNK+1];
  	 int buffer_idx;
@@ -98,10 +99,25 @@ CloseConnection(struct thread_context *ctx, int sockid)
 	mtcp_close(ctx->mctx, sockid);
 }
 
+
+/*----------------------------------------------------------------------------*/
+conn *conn_init(int fd) {
+	conn *c = malloc( sizeof(conn *));
+	if(c==NULL) {
+		printf("Error on create conn \n");	
+	}
+	c->fd = fd;
+	//c->state = IDLE;
+	c->bytes_to_eat = 0;
+	c->buffer_idx = 0;
+	
+    return c;
+}
 /*----------------------------------------------------------------------------*/
 int 
 AcceptConnection(struct thread_context *ctx, int listener)
 {
+	printf("test3:%ld\n", gettid());
 	mctx_t mctx = ctx->mctx;
 	struct mtcp_epoll_event ev;
 	int c;
@@ -116,6 +132,7 @@ AcceptConnection(struct thread_context *ctx, int listener)
 		}
 		TRACE_APP("New connection %d accepted.\n", c);
 
+		printf("New connection %d accepted.\n", c);
 		newconn = conn_init(c);
 		ev.data.ptr = newconn;
 		ev.events = MTCP_EPOLLIN;
@@ -218,6 +235,8 @@ CreateListeningSocket(struct thread_context *ctx)
 void *
 RunServerThread(void *arg)
 {
+	printf("test2 %d\n",gettid());
+	
 	int core = *(int *)arg;
 	struct thread_context *ctx;
 	mctx_t mctx;
@@ -358,57 +377,6 @@ SignalHandler(int signum)
 	}
 }
 /*----------------------------------------------------------------------------*/
-void inane_work() {
-  volatile int x = 0;
-  int i;
-  for (i = 0; i < 100; i++)
-    x;
-}
-
-void do_work(int iterations) {
-  int i;
-  for (i = 0; i < iterations; i++)
-    inane_work();
-}
-
-void do_work_usecs(int usecs) {
-  do_work(((double) usecs / 1000000) * args.calibration_arg);
-}
-
-void work() {
-  do_work_usecs(args.work_arg);
-}
-
-static inline int64_t calcdiff_us(struct timespec t1, struct timespec t2) {
-  int64_t diff;
-  diff = USEC_PER_SEC * (long long)((int) t1.tv_sec - (int) t2.tv_sec);
-  diff += ((int) t1.tv_nsec - (int) t2.tv_nsec) / 1000;
-  return diff;
-}
-
-uint64_t work_per_sec(uint64_t iterations) {
-  struct timespec start, stop;
-  clock_gettime(CLOCK_MONOTONIC, &start);
-  do_work(iterations);
-  clock_gettime(CLOCK_MONOTONIC, &stop);
-  uint64_t diff = calcdiff_us(stop, start);
-  return iterations * 1000000 / diff;
-}
-
-conn *conn_init(int fd) {
-	conn *c = malloc( sizeof(conn *)));
-	if(c==NULL) {
-		printf("Error on create conn \n");	
-	}
-	c->fd = fd;
-	c->state = IDLE;
-	c->bytes_to_eat = 0;
-	c->buffer_idx = 0;
-	
-    return c;
-}
-
-
 
 int 
 main(int argc, char **argv)
@@ -441,7 +409,7 @@ main(int argc, char **argv)
 			printf("Value_size=%d\n", value_size);
 		}
 	}
-
+        printf("test1: %ld\n", gettid());
 	/* initialize mtcp */
 	ret = mtcp_init("epserver.conf");
 	if (ret) {
