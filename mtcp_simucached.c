@@ -117,7 +117,7 @@ conn *conn_init(int fd) {
 int 
 AcceptConnection(struct thread_context *ctx, int listener)
 {
-	printf("test3:%ld\n", gettid());
+	//printf("test3:%ld\n", gettid());
 	mctx_t mctx = ctx->mctx;
 	struct mtcp_epoll_event ev;
 	int c;
@@ -132,7 +132,7 @@ AcceptConnection(struct thread_context *ctx, int listener)
 		}
 		TRACE_APP("New connection %d accepted.\n", c);
 
-		printf("New connection %d accepted.\n", c);
+		//printf("New connection %d accepted.\n", c);
 		newconn = conn_init(c);
 		ev.data.ptr = newconn;
 		ev.events = MTCP_EPOLLIN;
@@ -235,7 +235,7 @@ CreateListeningSocket(struct thread_context *ctx)
 void *
 RunServerThread(void *arg)
 {
-	printf("test2 %d\n",gettid());
+//	printf("Runserver %d\n",gettid());
 	
 	int core = *(int *)arg;
 	struct thread_context *ctx;
@@ -247,7 +247,7 @@ RunServerThread(void *arg)
 	int i, ret;
 	int do_accept;
 
-	int fd;
+	int fd=-1;
 	struct iovec iovs[3];
 	int len;
 	char s[value_size+10];
@@ -267,7 +267,10 @@ RunServerThread(void *arg)
 
 	iovs[2].iov_base = (char*) s;
  	iovs[2].iov_len = strlen(s);
-	
+  
+        char send [100];
+
+	sprintf(send, "VALUE key 0 5\r\naaaaa\r\nEND\r\n");	
 	/* initialization */
 	ctx = InitializeServerThread(core);
 	if (!ctx) {
@@ -292,7 +295,7 @@ RunServerThread(void *arg)
 
 	while (!done[core]) {
 		nevents = mtcp_epoll_wait(mctx, ep, events, MAX_EVENTS, -1);
-		if (nevents < 0) {
+		if (nevents < 1) {
 			if (errno != EINTR)
 				perror("mtcp_epoll_wait");
 			break;
@@ -302,17 +305,20 @@ RunServerThread(void *arg)
 		for (i = 0; i < nevents; i++) {
 			c = (conn *)events[i].data.ptr;
 			fd = c->fd;
-			
+			printf("fd=%d\n", fd);
 			if (events[i].data.sockid == listener) {
 				/* if the event is for the listener, accept connection */
 				do_accept = TRUE;
+				//printf("run: if condition\n");
 
-			} else {
-		 		ret = mtcp_read(mctx, fd, c->buffer, sizeof(c->buffer));
-			        if (ret <= 0) {
+			} else if (events[i].events) {
+		 		//ret = mtcp_read(mctx, fd, c->buffer, sizeof(c->buffer));
+		 		ret = mtcp_read(mctx, events[i].data.sockid, c->buffer, sizeof(c->buffer));
+				printf("run: ret=%d\n", ret);
+				if (ret <= 0) {
 				          if (ret == EAGAIN) printf("read() returned EAGAIN");
 				          close(fd);
-				          free(c);
+				          //free(c);
 				          continue;
 			        }
 
@@ -324,22 +330,23 @@ RunServerThread(void *arg)
 			        // Locate a \r\n
 			        char *crlf = NULL;
 			        while (start < &c->buffer[c->buffer_idx]) {
+					  //printf("while loop\n");
 				          crlf = strstr(start, "\r\n");
 
 				          if (crlf == NULL) break; // No \r\n found.
 
 				          int length = crlf - start;
 
-				          if (mtcp_writev(mctx, fd, iovs, 3) == EAGAIN) {
-						  	printf("writev() returned EAGAIN");
-				          		start += length + 2;
-				          }		
+					  events[i].events = MTCP_EPOLLIN | MTCP_EPOLLOUT;
+					  mtcp_epoll_ctl(ctx->mctx, ctx->ep, MTCP_EPOLL_CTL_MOD, events[i].data.sockid, &events[i]);	
+				         // if (mtcp_writev(mctx, events[i].data.sockid, iovs, 3) == EAGAIN) 
+				          if (mtcp_write(mctx, events[i].data.sockid, send, strlen(send)) == EAGAIN) 
+						  printf("writev() returned EAGAIN\n");
+				          start += length + 2;		`
 			        }
-
-			        continue;				
-
-			}
-			
+ 			} else {
+				assert(0);
+		   	}	
 		}
 
 		/* if do_accept flag is set, accept connections */
@@ -408,8 +415,10 @@ main(int argc, char **argv)
 			value_size = atoi(argv[i + 1]);
 			printf("Value_size=%d\n", value_size);
 		}
+		else 
+			value_size = 64;
 	}
-        printf("test1: %ld\n", gettid());
+        //printf("test1: %ld\n", gettid());
 	/* initialize mtcp */
 	ret = mtcp_init("epserver.conf");
 	if (ret) {
