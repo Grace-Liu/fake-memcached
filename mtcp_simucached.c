@@ -251,8 +251,10 @@ RunServerThread(void *arg)
 	struct iovec iovs[3];
 	int len;
 	char s[value_size+10];
-	conn *c;
-
+	//conn *c;
+	int buffer_idx;
+	char buffer[1024];
+	/*
 	iovs[0].iov_base = (char*) "VALUE ";
   	iovs[0].iov_len = strlen((char*) iovs[0].iov_base);
   	iovs[1].iov_base = (char*) "key";
@@ -267,7 +269,7 @@ RunServerThread(void *arg)
 
 	iovs[2].iov_base = (char*) s;
  	iovs[2].iov_len = strlen(s);
-  
+        */
         char send [100];
 
 	sprintf(send, "VALUE key 0 5\r\naaaaa\r\nEND\r\n");	
@@ -303,9 +305,9 @@ RunServerThread(void *arg)
 
 		do_accept = FALSE;
 		for (i = 0; i < nevents; i++) {
-			c = (conn *)events[i].data.ptr;
-			fd = c->fd;
-			printf("fd=%d\n", fd);
+			//c = (conn *)events[i].data.ptr;
+			//fd = c->fd;
+			//printf("fd=%d\n", fd);
 			if (events[i].data.sockid == listener) {
 				/* if the event is for the listener, accept connection */
 				do_accept = TRUE;
@@ -313,23 +315,23 @@ RunServerThread(void *arg)
 
 			} else if (events[i].events) {
 		 		//ret = mtcp_read(mctx, fd, c->buffer, sizeof(c->buffer));
-		 		ret = mtcp_read(mctx, events[i].data.sockid, c->buffer, sizeof(c->buffer));
-				printf("run: ret=%d\n", ret);
+		 		ret = mtcp_read(mctx, events[i].data.sockid, buffer, sizeof(1024));
+				//printf("run: ret=%d\n", ret);
 				if (ret <= 0) {
 				          if (ret == EAGAIN) printf("read() returned EAGAIN");
-				          close(fd);
+				         // close(fd);
 				          //free(c);
 				          continue;
 			        }
 
-			        c->buffer_idx = ret;
-			        c->buffer[c->buffer_idx] = '\0';
+			        buffer_idx = ret;
+			        buffer[buffer_idx] = '\0';
 
-			        char *start = c->buffer;
+			        char *start = buffer;
 
 			        // Locate a \r\n
 			        char *crlf = NULL;
-			        while (start < &c->buffer[c->buffer_idx]) {
+			        while (start < &buffer[buffer_idx]) {
 					  //printf("while loop\n");
 				          crlf = strstr(start, "\r\n");
 
@@ -342,8 +344,10 @@ RunServerThread(void *arg)
 				         // if (mtcp_writev(mctx, events[i].data.sockid, iovs, 3) == EAGAIN) 
 				          if (mtcp_write(mctx, events[i].data.sockid, send, strlen(send)) == EAGAIN) 
 						  printf("writev() returned EAGAIN\n");
-				          start += length + 2;		`
+				          start += length + 2;		
 			        }
+			//} else if (events[i].events && MTCP_EPOLLOUT) {
+				
  			} else {
 				assert(0);
 		   	}	
@@ -413,7 +417,7 @@ main(int argc, char **argv)
 		}
 		if (strcmp(argv[i], "-V") == 0) {
 			value_size = atoi(argv[i + 1]);
-			printf("Value_size=%d\n", value_size);
+			//printf("Value_size=%d\n", value_size);
 		}
 		else 
 			value_size = 64;
