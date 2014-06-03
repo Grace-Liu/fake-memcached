@@ -85,7 +85,6 @@ AcceptConnection(struct thread_context *ctx, int listener)
 	mctx_t mctx = ctx->mctx;
 	struct mtcp_epoll_event ev;
 	int c;
-	conn *newconn;
 
 	c = mtcp_accept(mctx, listener, NULL, NULL);
 
@@ -97,8 +96,6 @@ AcceptConnection(struct thread_context *ctx, int listener)
 		TRACE_APP("New connection %d accepted.\n", c);
 
 		//printf("New connection %d accepted.\n", c);
-		newconn = conn_init(c);
-		ev.data.ptr = newconn;
 		ev.events = MTCP_EPOLLIN;
 		ev.data.sockid = c;
 		mtcp_setsock_nonblock(ctx->mctx, c);
@@ -211,18 +208,20 @@ RunServerThread(void *arg)
 	int do_accept;
 
 	int len;
-	char send[value_size+10];
+	//char send[value_size+50];
+	char send[100];	
 	int buffer_idx;
 	char buffer[1024];
 	
+	/*printf("value_size=%d\n",value_size);
 	sprintf(send, "VALUE key 0 %d\r\n\0", value_size);
 	len = strlen(send);
 	for(i = 0; i< value_size; i++)
        	 send[len+i] = 'f';
 	send[i] = '\0';
 	strcat(send, "\r\nEND\r\n");
-
-	//sprintf(send, "VALUE key 0 5\r\naaaa\r\nEND\r\n");	
+        */
+	sprintf(send, "VALUE key 0 5\r\naaaaaaaaaa\r\nEND\r\n");	
 	/* initialization */
 	ctx = InitializeServerThread(core);
 	if (!ctx) {
